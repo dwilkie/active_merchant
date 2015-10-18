@@ -26,6 +26,13 @@ class ConnectionTest < Test::Unit::TestCase
     end
   end
 
+  def test_successful_head_request
+    @connection.logger.expects(:info).twice
+    Net::HTTP.any_instance.expects(:head).with('/tx.php', {}).returns(@ok)
+    response = @connection.request(:head, nil, {})
+    assert_equal 200, response.code
+  end
+
   def test_successful_get_request
     @connection.logger.expects(:info).twice
     Net::HTTP.any_instance.expects(:get).with('/tx.php', {}).returns(@ok)
@@ -59,7 +66,7 @@ class ConnectionTest < Test::Unit::TestCase
 
   def test_request_raises_when_request_method_not_supported
     assert_raises(ArgumentError) do
-      @connection.request(:head, nil, {})
+      @connection.request(:trace, nil, {})
     end
   end
 

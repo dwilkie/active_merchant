@@ -59,8 +59,11 @@ module ActiveMerchant
 
           realtime = Benchmark.realtime do
             result = case method
+            when :head
+              raise_body_not_supported(:head, body)
+              http.head(endpoint.request_uri, headers)
             when :get
-              raise ArgumentError, "GET requests do not support a request body" if body
+              raise_body_not_supported(:get, body)
               http.get(endpoint.request_uri, headers)
             when :post
               debug body
@@ -167,6 +170,10 @@ module ActiveMerchant
     def log(level, message, tag)
       message = "[#{tag}] #{message}" if tag
       logger.send(level, message) if logger
+    end
+
+    def raise_body_not_supported(method, body)
+      raise(ArgumentError, "#{method.upcase} requests do not support a request body") if body
     end
   end
 end
