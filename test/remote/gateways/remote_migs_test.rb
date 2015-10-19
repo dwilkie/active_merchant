@@ -18,22 +18,24 @@ class RemoteMigsTest < Test::Unit::TestCase
     @credit_card = @visa
 
     @options = {
+      :order_id => '1'
+    }
+
+    @purchase_offsite_url_options = {
       :order_id => '1',
-      :currency => 'USD'
+      :unique_id  => 9,
+      :return_url => 'http://localhost:8080/payments/return'
     }
   end
 
-  def test_server_purchase_url
-    options = {
-      :order_id   => 1,
-      :unique_id  => 9,
-      :return_url => 'http://localhost:8080/payments/return',
-      :currency => 'USD'
-    }
-
-    choice_url = @gateway.purchase_offsite_url(@amount, options)
-
+  def test_purchase_offsite_url
+    choice_url = @gateway.purchase_offsite_url(@amount, @purchase_offsite_url_options)
     assert_response_match /Pay securely by clicking on the card logo below/, choice_url
+  end
+
+  def test_purchase_offsite_url_with_card_type
+    # This fails with an error:
+    # vpc_Message:E5000: No bank links are configured for merchant [TESTANZTEST2]
 
     responses = {
       'visa'             => /You have chosen .*VISA.*/,
@@ -43,7 +45,7 @@ class RemoteMigsTest < Test::Unit::TestCase
     }
 
     responses.each_pair do |card_type, response_text|
-      url = @capture_gateway.purchase_offsite_url(@amount, options.merge(:card_type => card_type))
+      url = @capture_gateway.purchase_offsite_url(@amount, @purchase_offsite_url_options.merge(:card_type => card_type))
       assert_response_match response_text, url
     end
   end
