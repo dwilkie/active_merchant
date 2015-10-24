@@ -27,16 +27,20 @@ module ActiveMerchant #:nodoc:
       base.class_attribute :proxy_port
     end
 
-    def ssl_get(endpoint, headers={})
-      ssl_request(:get, endpoint, nil, headers)
+    def ssl_head(endpoint, headers = {}, options = {})
+      ssl_request(:head, endpoint, nil, headers, {:raw => true}.merge(options))
     end
 
-    def ssl_post(endpoint, data, headers = {})
-      ssl_request(:post, endpoint, data, headers)
+    def ssl_get(endpoint, headers = {}, options = {})
+      ssl_request(:get, endpoint, nil, headers, options)
     end
 
-    def ssl_request(method, endpoint, data, headers)
-      handle_response(raw_ssl_request(method, endpoint, data, headers))
+    def ssl_post(endpoint, data, headers = {}, options = {})
+      ssl_request(:post, endpoint, data, headers, options)
+    end
+
+    def ssl_request(method, endpoint, data, headers, options = {})
+      handle_response(raw_ssl_request(method, endpoint, data, headers), options)
     end
 
     def raw_ssl_request(method, endpoint, data, headers = {})
@@ -71,7 +75,8 @@ module ActiveMerchant #:nodoc:
       Connection.new(endpoint)
     end
 
-    def handle_response(response)
+    def handle_response(response, options = {})
+      return response if options[:raw]
       case response.code.to_i
       when 200...300
         response.body
@@ -79,6 +84,5 @@ module ActiveMerchant #:nodoc:
         raise ResponseError.new(response)
       end
     end
-
   end
 end

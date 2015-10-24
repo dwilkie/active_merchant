@@ -1,6 +1,7 @@
 require 'active_merchant/billing/gateways/migs/migs_codes'
 
 require 'digest/md5' # Used in add_secure_hash
+require 'nokogiri'
 
 module ActiveMerchant #:nodoc:
   module Billing #:nodoc:
@@ -8,13 +9,18 @@ module ActiveMerchant #:nodoc:
       include MigsCodes
 
       API_VERSION = 1
+      PAYMENT_ID_PARAM_NAME = "paymentId"
+      SET_COOKIE_PARAM_NAME = "set-cookie"
+      DEFAULT_GATEWAY_HOST = 'https://migs.mastercard.com.au'
 
       class_attribute :server_hosted_url, :merchant_hosted_url
 
-      self.server_hosted_url = 'https://migs.mastercard.com.au/vpcpay'
-      self.merchant_hosted_url = 'https://migs.mastercard.com.au/vpcdps'
+      self.server_hosted_url = "#{DEFAULT_GATEWAY_HOST}/vpcpay"
+      self.merchant_hosted_url = "#{DEFAULT_GATEWAY_HOST}/vpcdps"
 
       self.live_url = self.server_hosted_url
+
+      attr_accessor :gateway_host, :offsite_payment_url
 
       # MiGS is supported throughout Asia Pacific, Middle East and Africa
       # MiGS is used in Australia (AU) by ANZ (eGate), CBA (CommWeb) and more
@@ -160,7 +166,7 @@ module ActiveMerchant #:nodoc:
 
         add_secure_hash(post)
 
-        self.server_hosted_url + '?' + post_data(post)
+        (options[:url] || self.server_hosted_url) + '?' + post_data(post)
       end
 
       # Parses a response from purchase_offsite_url once user is redirected back
@@ -186,7 +192,140 @@ module ActiveMerchant #:nodoc:
         @options[:login].start_with?('TEST')
       end
 
+      def purchase_offsite(money, creditcard, options = {})
+        requires!(options, :card_type)
+        card_type = (options[:card_type_permission] == false) && options.delete(:card_type)
+
+        offsite_url = purchase_offsite_url(money, {:url => offsite_server_hosted_url}.merge(options))
+        p offsite_url
+        offsite_url_response = ssl_head(offsite_url)
+
+        payment_url = get_redirect_url(offsite_url_response)
+
+        # set the payment id and headers from the response
+        offsite_payment_id(payment_url)
+        offsite_headers(offsite_url_response)
+
+        # hit the payment url (select card type or payment form)
+        p offsite_ssl_head(payment_url)["location"]
+        navigate_to_payment_url_without_card_type_permission(card_type) if card_type
+
+#        payment_response = offsite_ssl_post(
+#          offsite_payment_url,
+#          post_data(offsite_payment_request_params(creditcard), :prefix => false)
+#        )
+
+        p offsite_payment_url
+        p offsite_headers
+        p post_data(offsite_payment_request_params(creditcard), :prefix => false)
+
+        #parse_offsite_payment_response(payment_response)
+
+      end
+
+      def gateway_host
+        @gateway_host || DEFAULT_GATEWAY_HOST
+      end
+
       private
+
+      def parse_offsite_payment_response(response)
+        File.write("foo.html", response)
+        html = Nokogiri::HTML(response)
+        form = html.at_xpath(".//form[@name='PAReq']")
+        form_action = form["action"]
+        pa_req_input =  form.at_xpath(".//input[@name='PaReq']")
+        pa_req_value = pa_req_input["value"]
+        term_url_input = form.at_xpath(".//input[@name='TermUrl']")
+        term_url_value = term_url_input["value"]
+        md_input = form.at_xpath(".//input[@name='MD']")
+        md_input_value = md_input["value"]
+
+        p form_action
+      end
+
+      def navigate_to_payment_url_without_card_type_permission(card_type)
+        # hit card type URL
+        choose_card_response = offsite_ssl_head(
+          build_get_url(offsite_server_hosted_url, offsite_card_type_request_params(card_type))
+        )
+
+        # hit the payment form url
+        offsite_ssl_head(get_redirect_url(choose_card_response))
+      end
+
+      def offsite_server_hosted_url
+        migs_url("vpcpay") || server_hosted_url
+      end
+
+      def offsite_payment_url
+        migs_url("ssl")
+      end
+
+      def migs_url(path)
+        "#{gateway_host}/#{path}"
+      end
+
+      def offsite_payment_request_params(creditcard)
+        # order of params is important here
+        params = {}
+        offsite_add_payment_id_params(params)
+        params.merge(
+          "cardno" => creditcard.number,
+          "cardexpirymonth" => creditcard.month.to_s.rjust(2, '0'),
+          "cardexpiryyear" => Date.new(creditcard.year.to_i).strftime("%y"),
+          "cardsecurecode" => creditcard.verification_value
+        )
+      end
+
+      def offsite_ssl_post(url, params)
+        ssl_post(url, params, offsite_headers)
+      end
+
+      def offsite_ssl_head(url)
+        ssl_head(url, offsite_headers)
+      end
+
+      def offsite_headers(response = nil)
+        @offsite_headers ||= offsite_cookies(response)
+      end
+
+      def get_redirect_url(response)
+        response["location"]
+      end
+
+      def offsite_card_type_request_params(card_type)
+        params = {}
+        add_creditcard_type(params, card_type)
+        offsite_add_payment_id_params(params)
+        params
+      end
+
+      def offsite_add_payment_id_params(params)
+        params[PAYMENT_ID_PARAM_NAME] = offsite_payment_id
+      end
+
+      def offsite_cookies(response)
+        {
+          "Cookie" => response.get_fields(
+            SET_COOKIE_PARAM_NAME
+          ).map { |cookie| cookie.split("; ")[0] }.join("; ")
+        }
+      end
+
+      def offsite_payment_id(url = nil)
+        @offsite_payment_id ||= parse_url_params(url)[PAYMENT_ID_PARAM_NAME]
+      end
+
+      def parse_url_params(url)
+        Hash[CGI::parse(URI.parse(url).query).map { |k, v| [k, v[0]] }]
+      end
+
+      def build_get_url(url, params)
+        uri = URI.parse(url)
+        uri.query = post_data(params, :prefix => false)
+        uri.to_s
+      end
 
       def add_amount(post, money, options)
         post[:Amount] = amount(money)
@@ -262,8 +401,11 @@ module ActiveMerchant #:nodoc:
         )
       end
 
-      def post_data(post)
-        post.collect { |key, value| "vpc_#{key}=#{CGI.escape(value.to_s)}" }.join("&")
+      def post_data(post, options = {})
+        post.collect do |key, value|
+          prefixed_key = [(options[:prefix] == false ? nil : 'vpc'), key].compact.join("_")
+          "#{prefixed_key}=#{CGI.escape(value.to_s)}"
+        end.join("&")
       end
 
       def add_secure_hash(post)

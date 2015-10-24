@@ -34,7 +34,7 @@ class RemoteMigsTest < Test::Unit::TestCase
   end
 
   def test_purchase_offsite_url_with_card_type
-    # This fails with an error:
+    # This fails then redirects with error:
     # vpc_Message:E5000: No bank links are configured for merchant [TESTANZTEST2]
 
     responses = {
@@ -48,6 +48,27 @@ class RemoteMigsTest < Test::Unit::TestCase
       url = @capture_gateway.purchase_offsite_url(@amount, @purchase_offsite_url_options.merge(:card_type => card_type))
       assert_response_match response_text, url
     end
+  end
+
+  #TEST=./test/remote/gateways/remote_migs_test.rb TESTOPTS="--name=test_purchase_offsite" bundle exec rake test:remote
+
+  def test_purchase_offsite
+    purchase_offsite_options = @purchase_offsite_url_options.merge(
+      :card_type => "visa",
+    )
+
+    assert response = @gateway.purchase_offsite(@amount, @credit_card, @options.merge(purchase_offsite_options))
+  end
+
+  def test_purchase_offsite_select_card
+    gateway = MigsGateway.new(fixtures(:migs_purchase_select_card))
+    gateway.gateway_host = 'https://migs-mtf.mastercard.com.au'
+
+    purchase_offsite_options = @purchase_offsite_url_options.merge(
+      :card_type => "visa", :card_type_permission => false
+    )
+
+    assert response = gateway.purchase_offsite(@amount, @credit_card, @options.merge(purchase_offsite_options))
   end
 
   def test_successful_purchase
